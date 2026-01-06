@@ -1,5 +1,5 @@
 # NX2 Proコントローラーエミュレーション (Raspberry Pi Pico + TinyUSB)
-
+(現状は動作しません)
 Raspberry Pi Pico 上で Nintendo Switch2 (NX2) の Pro コントローラーをエミュレートする最小構成のサンプルです。`pico-sdk` と TinyUSB を利用し、USB HID デバイスとして Switch2 向けのレポートを送信します。
 
 ## 仕組みの概要
