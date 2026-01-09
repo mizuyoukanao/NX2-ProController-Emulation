@@ -377,8 +377,6 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
     return desc_configuration;
 }
 
-static uint16_t _desc_str[(sizeof(string_desc_arr) / 2)];
-
 // String descriptors
 char const *string_desc_arr[] = {
     (const char[]){0x09, 0x04, 0x02, 0x04, 0x01, 0x08},        // 0: is supported language is English (0x0409)
@@ -390,6 +388,8 @@ char const *string_desc_arr[] = {
     "Switch 2 Pro Controller",
 };
 
+static uint16_t _desc_str[(sizeof(string_desc_arr) / 2)];
+
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
     (void)langid;
     uint8_t chr_count;
@@ -399,9 +399,9 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
         _desc_str[2] = string_desc_arr[0][2] | (string_desc_arr[0][3] << 8);
         _desc_str[3] = string_desc_arr[0][4] | (string_desc_arr[0][5] << 8);
         chr_count = 3;
-    } elseif (index == 0xEE){
+    } else if (index == 0xEE) {
         // Microsoft OS 1.0 Descriptors
-        const char ms_os_desc[] = "MSFT100"
+        const char ms_os_desc[] = "MSFT100";
         chr_count = (uint8_t)strlen(ms_os_desc);
         for (uint8_t i = 0; i < chr_count; i++) {
             _desc_str[1 + i] = ms_os_desc[i];
