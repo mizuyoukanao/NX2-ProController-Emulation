@@ -9,18 +9,21 @@
 #define CFG_TUSB_RHPORT0_MODE OPT_MODE_DEVICE
 #define CFG_TUSB_OS OPT_OS_PICO
 
+#define CFG_TUD_ENABLED 1
+
 #define CFG_TUD_ENDPOINT0_SIZE 64
 
 // HID only device configuration
 #define CFG_TUD_HID 1
 #define CFG_TUD_HID_EP_BUFSIZE 64
-
+#define CFG_TUD_AUDIO 1
 // No CDC/MIDI etc.
 #define CFG_TUD_CDC 0
 #define CFG_TUD_MSC 0
 #define CFG_TUD_MIDI 0
-#define CFG_TUD_NET 0
+#define CFG_TUD_ECM_RNDIS 0
 #define CFG_TUD_CUSTOM_CLASS 0
+#define CFG_TUD_VENDOR 1
 
 // Disable USB high speed since RP2040 is FS only
 #define CFG_TUD_MAX_SPEED OPT_MODE_FULL_SPEED
