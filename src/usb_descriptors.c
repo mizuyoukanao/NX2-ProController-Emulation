@@ -1,10 +1,16 @@
 #include "tusb.h"
 #include <string.h>
 
+#define CHANGE_DESC 1
+
 // Nintendo Switch2 Pro コントローラーの VID/PID/Bcd デバイス値。
 // 参考資料: handheldlegend/docs の Pro Controller 2 / USB initialization ノート。
 #define USB_VID 0x057E
+#if CHANGE_DESC
+#define USB_PID 0x2066
+#else
 #define USB_PID 0x2069
+#endif
 #define USB_BCD 0x0200
 
 // HID report descriptor: NX2 Pro コントローラーの USB 入力/出力/Feature を
@@ -13,7 +19,58 @@
 // - 出力レポート ID 0x21: ベンダー定義 64B (ランブル/LED/モーション設定受信用)
 // - Feature レポート ID 0x80: ベンダー定義 64B (初期ハンドシェイク応答用)
 uint8_t const desc_hid_report[] = {
+#if CHANGE_DESC
 0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
+0x09, 0x05,        // Usage (Game Pad)
+0xA1, 0x01,        // Collection (Application)
+0x85, 0x05,        //   Report ID (5)
+0x05, 0xFF,        //   Usage Page (Reserved 0xFF)
+0x09, 0x01,        //   Usage (0x01)
+0x15, 0x00,        //   Logical Minimum (0)
+0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+0x95, 0x3F,        //   Report Count (63)
+0x75, 0x08,        //   Report Size (8)
+0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+0x85, 0x08,        //   Report ID (8)
+0x09, 0x01,        //   Usage (0x01)
+0x95, 0x02,        //   Report Count (2)
+0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+0x05, 0x09,        //   Usage Page (Button)
+0x19, 0x01,        //   Usage Minimum (0x01)
+0x29, 0x10,        //   Usage Maximum (0x10)
+0x25, 0x01,        //   Logical Maximum (1)
+0x95, 0x10,        //   Report Count (16)
+0x75, 0x01,        //   Report Size (1)
+0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+0x05, 0xFF,        //   Usage Page (Reserved 0xFF)
+0x09, 0x01,        //   Usage (0x01)
+0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+0x95, 0x01,        //   Report Count (1)
+0x75, 0x08,        //   Report Size (8)
+0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+0x05, 0x01,        //   Usage Page (Generic Desktop Ctrls)
+0x09, 0x01,        //   Usage (Pointer)
+0xA1, 0x00,        //   Collection (Physical)
+0x09, 0x30,        //     Usage (X)
+0x09, 0x31,        //     Usage (Y)
+0x26, 0xFF, 0x0F,  //     Logical Maximum (4095)
+0x95, 0x02,        //     Report Count (2)
+0x75, 0x0C,        //     Report Size (12)
+0x81, 0x02,        //     Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+0xC0,              //   End Collection
+0x05, 0xFF,        //   Usage Page (Reserved 0xFF)
+0x09, 0x02,        //   Usage (0x02)
+0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+0x95, 0x37,        //   Report Count (55)
+0x75, 0x08,        //   Report Size (8)
+0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+0x85, 0x01,        //   Report ID (1)
+0x09, 0x01,        //   Usage (0x01)
+0x95, 0x3F,        //   Report Count (63)
+0x91, 0x02,        //   Output (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
+0xC0,              // End Collection
+#else
+    0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
 0x09, 0x05,        // Usage (Game Pad)
 0xA1, 0x01,        // Collection (Application)
 0x85, 0x05,        //   Report ID (5)
@@ -61,6 +118,7 @@ uint8_t const desc_hid_report[] = {
 0x95, 0x3F,        //   Report Count (63)
 0x91, 0x02,        //   Output (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
 0xC0,              // End Collection
+#endif
 };
 
 // Device descriptor (Switch2 Pro Controller)
@@ -71,10 +129,13 @@ static tusb_desc_device_t const desc_device = {
     .bDeviceClass = 0xEF,
     .bDeviceSubClass = 0x02,
     .bDeviceProtocol = 0x01,
+//    .bDeviceClass = 0x00,
+//    .bDeviceSubClass = 0x00,
+//    .bDeviceProtocol = 0x00,
     .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
     .idVendor = USB_VID,
     .idProduct = USB_PID,
-    .bcdDevice = 0x0200,
+    .bcdDevice = 0x0201,
     .iManufacturer = 0x01,
     .iProduct = 0x02,
     .iSerialNumber = 0x03,
@@ -100,7 +161,92 @@ uint8_t const desc_configuration[] = {
 
     // Interface, string index, protocol, report descriptor len, EP In address, size, polling interval
     //TUD_HID_DESCRIPTOR(0, 4, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 5)
+#if CHANGE_DESC
 0x09,        // bLength
+0x02,        // bDescriptorType (Configuration)
+0x50, 0x00,  // wTotalLength 80
+//0x40, 0x00,  // wTotalLength 64
+0x02,        // bNumInterfaces 2
+0x01,        // bConfigurationValue
+0x04,        // iConfiguration (String Index)
+0xC0,        // bmAttributes Self Powered
+0xFA,        // bMaxPower 500mA
+
+0x08,        // bLength
+0x0B,        // bDescriptorType (Interface Association)
+0x00,        // bFirstInterface
+0x01,        // bInterfaceCount
+0x03,        // bFunctionClass
+0x00,        // bFunctionSubClass
+0x00,        // bFunctionProtocol
+0x00,        // iFunction
+
+0x09,        // bLength
+0x04,        // bDescriptorType (Interface)
+0x00,        // bInterfaceNumber 0
+0x00,        // bAlternateSetting
+0x02,        // bNumEndpoints 2
+0x03,        // bInterfaceClass
+0x00,        // bInterfaceSubClass
+0x00,        // bInterfaceProtocol
+0x05,        // iInterface (String Index)
+
+0x09,        // bLength
+0x21,        // bDescriptorType (HID)
+0x11, 0x01,  // bcdHID 1.11
+0x00,        // bCountryCode
+0x01,        // bNumDescriptors
+0x22,        // bDescriptorType[0] (HID)
+0x64, 0x00,  // wDescriptorLength[0] 100
+
+0x07,        // bLength
+0x05,        // bDescriptorType (Endpoint)
+0x81,        // bEndpointAddress (IN/D2H)
+0x03,        // bmAttributes (Interrupt)
+0x40, 0x00,  // wMaxPacketSize 64
+0x04,        // bInterval 4 (unit depends on device speed)
+
+0x07,        // bLength
+0x05,        // bDescriptorType (Endpoint)
+0x01,        // bEndpointAddress (OUT/H2D)
+0x03,        // bmAttributes (Interrupt)
+0x40, 0x00,  // wMaxPacketSize 64
+0x04,        // bInterval 4 (unit depends on device speed)
+
+0x08,        // bLength
+0x0B,        // bDescriptorType (Interface Association)
+0x01,        // bFirstInterface
+0x01,        // bInterfaceCount
+0xFF,        // bFunctionClass
+0x00,        // bFunctionSubClass
+0x00,        // bFunctionProtocol
+0x00,        // iFunction
+
+0x09,        // bLength
+0x04,        // bDescriptorType (Interface)
+0x01,        // bInterfaceNumber 1
+0x00,        // bAlternateSetting
+0x02,        // bNumEndpoints 2
+0xFF,        // bInterfaceClass
+0x00,        // bInterfaceSubClass
+0x00,        // bInterfaceProtocol
+0x06,        // iInterface (String Index)
+
+0x07,        // bLength
+0x05,        // bDescriptorType (Endpoint)
+0x02,        // bEndpointAddress (OUT/H2D)
+0x02,        // bmAttributes (Bulk)
+0x40, 0x00,  // wMaxPacketSize 64
+0x00,        // bInterval 0 (unit depends on device speed)
+
+0x07,        // bLength
+0x05,        // bDescriptorType (Endpoint)
+0x82,        // bEndpointAddress (IN/D2H)
+0x02,        // bmAttributes (Bulk)
+0x40, 0x00,  // wMaxPacketSize 64
+0x00,        // bInterval 0 (unit depends on device speed)
+#else
+    0x09,        // bLength
 0x02,        // bDescriptorType (Configuration)
 0x0C, 0x01,  // wTotalLength 268
 0x05,        // bNumInterfaces 5
@@ -370,6 +516,7 @@ uint8_t const desc_configuration[] = {
 0x00,        // bmAttributes (None)
 0x00,        // bLockDelayUnits
 0x00, 0x00,  // wLockDelay 0
+#endif
 };
 
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
@@ -381,14 +528,22 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
 char const *string_desc_arr[] = {
     (const char[]){0x09, 0x04, 0x02, 0x04, 0x01, 0x08},        // 0: is supported language is English (0x0409)
     "Nintendo",            // 1: Manufacturer
+#if CHANGE_DESC
+    "Joy-Con 2 (R)",
+#else
     "Switch 2 Pro Controller", // 2: Product
+#endif
     "00",                           // 3: Serial
     "Config_0",
     "If_Hid",
+#if CHANGE_DESC
+    "Joy-Con 2 (R)",
+#else
     "Switch 2 Pro Controller",
+#endif
 };
 
-static uint16_t _desc_str[(sizeof(string_desc_arr) / 2)];
+static uint16_t _desc_str[sizeof(string_desc_arr)];
 
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
     (void)langid;
@@ -428,4 +583,28 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
     (void)itf;
     return desc_hid_report;
+}
+
+static tusb_desc_device_qualifier_t const desc_device_qualifier =
+{
+  .bLength            = sizeof(tusb_desc_device_qualifier_t),
+  .bDescriptorType    = TUSB_DESC_DEVICE_QUALIFIER,
+  .bcdUSB             = USB_BCD,
+
+  .bDeviceClass       = 0x00,
+  .bDeviceSubClass    = 0x00,
+  .bDeviceProtocol    = 0x00,
+
+  .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
+  .bNumConfigurations = 0x01,
+  .bReserved          = 0x00
+};
+
+// Invoked when received GET DEVICE QUALIFIER DESCRIPTOR request
+// Application return pointer to descriptor, whose contents must exist long enough for transfer to complete.
+// device_qualifier descriptor describes information about a high-speed capable device that would
+// change if the device were operating at the other speed. If not highspeed capable stall this request.
+uint8_t const* tud_descriptor_device_qualifier_cb(void)
+{
+  return (uint8_t const*) &desc_device_qualifier;
 }
