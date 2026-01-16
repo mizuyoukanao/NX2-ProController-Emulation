@@ -21,3 +21,6 @@ cmake --build .
 
 ## 留意点
 - レポート送信はBOOTSELボタンによるAボタンのON/OFFのみです。他のボタンやスティックを操作したい場合は `idle_payload` を更新してください。
+
+## 使用ライブラリ
+https://github.com/halloweeks/AES-128-ECB
