@@ -6,8 +6,10 @@
 // Nintendo Switch2 Pro コントローラーの VID/PID/Bcd デバイス値。
 // 参考資料: handheldlegend/docs の Pro Controller 2 / USB initialization ノート。
 #define USB_VID 0x057E
-#if CHANGE_DESC
+#if CHANGE_DESC == 1
 #define USB_PID 0x2066
+#elif CHANGE_DESC == 2
+#define USB_PID 0x2067
 #else
 #define USB_PID 0x2069
 #endif
@@ -31,7 +33,11 @@ uint8_t const desc_hid_report[] = {
 0x95, 0x3F,        //   Report Count (63)
 0x75, 0x08,        //   Report Size (8)
 0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+#if CHANGE_DESC == 1
 0x85, 0x08,        //   Report ID (8)
+#elif CHANGE_DESC == 2
+0x85, 0x07,        //   Report ID (7)
+#endif
 0x09, 0x01,        //   Usage (0x01)
 0x95, 0x02,        //   Report Count (2)
 0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
@@ -70,7 +76,7 @@ uint8_t const desc_hid_report[] = {
 0x91, 0x02,        //   Output (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
 0xC0,              // End Collection
 #else
-    0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
+0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
 0x09, 0x05,        // Usage (Game Pad)
 0xA1, 0x01,        // Collection (Application)
 0x85, 0x05,        //   Report ID (5)
@@ -528,16 +534,20 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
 char const *string_desc_arr[] = {
     (const char[]){0x09, 0x04, 0x02, 0x04, 0x01, 0x08},        // 0: is supported language is English (0x0409)
     "Nintendo",            // 1: Manufacturer
-#if CHANGE_DESC
+#if CHANGE_DESC == 1
     "Joy-Con 2 (R)",
+#elif CHANGE_DESC == 2
+    "Joy-Con 2 (L)",
 #else
     "Switch 2 Pro Controller", // 2: Product
 #endif
     "00",                           // 3: Serial
     "Config_0",
     "If_Hid",
-#if CHANGE_DESC
+#if CHANGE_DESC == 1
     "Joy-Con 2 (R)",
+#elif CHANGE_DESC == 2
+    "Joy-Con 2 (L)",
 #else
     "Switch 2 Pro Controller",
 #endif
