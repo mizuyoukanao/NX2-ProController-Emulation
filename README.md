@@ -1,9 +1,8 @@
 # NX2 Proコントローラーエミュレーション (Raspberry Pi Pico + TinyUSB)
-(現状は動作しません)
 Raspberry Pi Pico 上で Nintendo Switch2 (NX2) の Pro コントローラー/JoyCon2 (R)をエミュレートする最小構成のサンプルです。`pico-sdk` と TinyUSB を利用し、USB HID デバイスとして Switch2 向けのレポートを送信します。
 
 ## 仕組みの概要
-- `src/usb_descriptors.c` に NX2 Pro コントローラー/JoyCon2 (R)を模した HID レポートディスクリプタとデバイスディスクリプタを定義しています (VID 0x057E / PID 0x2069,0x2066 / BCD 0x0200)。
+- `src/usb_descriptors.c` に NX2 Pro コントローラー/JoyCon2 (R)を模した HID レポートディスクリプタとデバイスディスクリプタを定義しています (VID 0x057E / PID 0x2069,0x2066,0x2067 / BCD 0x0200)。
 - `src/main.c` では TinyUSB を初期化し、Switch2 からの出力レポート を [この資料](https://github.com/ndeadly/switch2_controller_research/blob/master/commands.md) のコマンドとして解釈します。
 
 ## ビルド手順
