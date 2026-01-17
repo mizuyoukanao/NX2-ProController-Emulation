@@ -15,9 +15,12 @@
 
 #define CHANGE_DESC 1
 
-#if CHANGE_DESC
+#if CHANGE_DESC == 1
 #define NX2_INPUT_REPORT_ID 0x08
 #define NX2_CONTROLLER_TYPE 0x01
+#elif CHANGE_DESC == 2
+#define NX2_INPUT_REPORT_ID 0x07
+#define NX2_CONTROLLER_TYPE 0x00
 #else
 #define NX2_INPUT_REPORT_ID 0x09
 #define NX2_CONTROLLER_TYPE 0x02
@@ -108,15 +111,29 @@ typedef struct __attribute__((packed)) {
 } nx2_joycon_r_input_payload_t;
 
 typedef struct __attribute__((packed)) {
+    uint8_t counter;
+    uint8_t connection_info;
+    uint8_t buttons[2];
+    uint8_t unknown;
+    uint8_t lstick[3];
+    uint8_t unknown2;
+    uint8_t mouse_data[5];
+    uint8_t unknown3;
+    uint8_t imu_data_len;
+    uint8_t imu[0x28];
+    uint8_t unknown4[7];
+} nx2_joycon_l_input_payload_t;
+
+typedef struct __attribute__((packed)) {
     uint8_t left_rumble[0x10];
     uint8_t right_rumble[0x10];
     uint8_t reserved[0x09];
 } nx2_output_payload_t;
 
-#if CHANGE_DESC
+#if CHANGE_DESC == 1
 static nx2_joycon_r_input_payload_t input_payload = {
     .counter = 0,
-    .connection_info = 0x91,
+    .connection_info = 0x23,
     .buttons = {0},
     .unknown = 0x07,
     .rstick = {0x00, 0x08, 0x80},
@@ -127,10 +144,24 @@ static nx2_joycon_r_input_payload_t input_payload = {
     .imu = {0},
     .unknown4 = {0},
 };
+#elif CHANGE_DESC == 2
+static nx2_joycon_l_input_payload_t input_payload = {
+    .counter = 0,
+    .connection_info = 0x23,
+    .buttons = {0},
+    .unknown = 0x07,
+    .lstick = {0x00, 0x08, 0x80},
+    .unknown2 = 0x00,
+    .mouse_data = {0},
+    .unknown3 = 0x00,
+    .imu_data_len = 0x00,
+    .imu = {0},
+    .unknown4 = {0},
+};
 #else
 static nx2_input_payload_t input_payload = {
     .counter = 0,
-    .connection_info = 0x91,
+    .connection_info = 0x23,
     .buttons = {0},
     .lstick = {0x00, 0x08, 0x80},
     .rstick = {0x00, 0x08, 0x80},
@@ -141,6 +172,24 @@ static nx2_input_payload_t input_payload = {
     .unknown2 = {0},
 };
 #endif
+
+typedef enum {
+    SetupRequestId_DeviceInfo  = 0x02,
+    SetupRequestId_FactoryData = 0x03,
+} SetupRequestId;
+
+typedef struct __attribute__((packed)) {
+    uint8_t major;
+    uint8_t minor;
+    uint8_t micro;
+} FirmwareVersion;
+
+typedef struct __attribute__((packed)) {
+    FirmwareVersion fw_version;
+    uint32_t bt_patch_version;
+    FirmwareVersion dsp_fw_version;
+    uint8_t bt_address_reversed[6];
+} DeviceInfo;
 
 // commands.md で規定されている「実レポート構成」を模した 64 バイトの応答バッファ。
 // HID レポートディスクリプタとは異なり、先頭にコマンド ID とステータスを入れる。
@@ -160,32 +209,41 @@ static nx2_output_payload_t output_payload = {
     .reserved = {0},
 };
 AES_CTX ctx;
+DeviceInfo device_info = {
+    .fw_version = { .major = 0x02, .minor = 0x01, .micro = 0x04 },
+    .bt_patch_version = 12,
+    .dsp_fw_version = { .major = 0x00, .minor = 0x02, .micro = 0x03 },
+    .bt_address_reversed = { 0xe8, 0x20, 0x17, 0x05, 0x48, 0xc8 },
+};
 //mutex_t __usb_mutex;
 
 static uint8_t spi_flash_0x00013080[] = {
     0x01, 0xad, 0xd9, 0x9a, 0x55, 0x56, 0x65, 0xa0, 0x00, 0x0a, 0xa0, 0x00, 0x0a, 0xe2, 0x20, 0x0e,
     0xe2, 0x20, 0x0e, 0x9a, 0xad, 0xd9, 0x9a, 0xad, 0xd9, 0x0a, 0xa5, 0x50, 0x0a, 0xa5, 0x50, 0x2f,
-    0xf6, 0x62, 0x2f, 0xf6, 0x62, 0x0a, 0xff, 0xff, 0xa3, 0xa7, 0x87, 0x35, 0x06, 0x5f, 0x1c, 0xc6,
-    0x5c, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+    0xf6, 0x62, 0x2f, 0xf6, 0x62, 0x0a, 0xff, 0xff, 0xbc, 0x97, 0x85, 0x4f, 0x16, 0x5f, 0x2e, 0x96,
+    0x61, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
 };
 static uint8_t spi_flash_0x000130c0[] = {
     0x01, 0xad, 0xd9, 0x9a, 0x55, 0x56, 0x65, 0xa0, 0x00, 0x0a, 0xa0, 0x00, 0x0a, 0xe2, 0x20, 0x0e,
     0xe2, 0x20, 0x0e, 0x9a, 0xad, 0xd9, 0x9a, 0xad, 0xd9, 0x0a, 0xa5, 0x50, 0x0a, 0xa5, 0x50, 0x2f,
-    0xf6, 0x62, 0x2f, 0xf6, 0x62, 0x0a, 0xff, 0xff, 0xb1, 0xa8, 0x83, 0xb6, 0x35, 0x5e, 0x27, 0x26,
+    0xf6, 0x62, 0x2f, 0xf6, 0x62, 0x0a, 0xff, 0xff, 0x73, 0x38, 0x82, 0xf5, 0x55, 0x60, 0x2a, 0x56,
     0x64, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
 };
 static uint8_t spi_flash_0x00013040[] = {
-    0x16, 0xf4, 0xd3, 0x41, 0x48, 0xce, 0x85, 0xba, 0xf1, 0x05, 0x71, 0xba, 0x1f, 0x27, 0xcb, 0x3b
+    0x85, 0x2e, 0xec, 0x41, 0x49, 0xec, 0x20, 0xbc, 0xc5, 0x5d, 0x3f, 0xbc, 0xad, 0x11, 0x42, 0x3b
 };
 static uint8_t spi_flash_0x00013100[] = {
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2d, 0x10, 0xa7, 0x3d,
-    0xe7, 0x49, 0x35, 0x3c, 0xa4, 0x2d, 0x20, 0x41
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xfe, 0xd2, 0x7e, 0xbd,
+    0x33, 0x8a, 0xbe, 0xbe, 0xaa, 0x82, 0x20, 0x41
 };
 static uint8_t amiibo_header[] = {
     0x01, 0x58, 0x02, 0x04, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x07
 };
 static uint8_t amiibo_header2[] = {
-    0x04, 0x00, 0x00, 0x00, 0x01, 0x01, 0x02, 0x00, 0x07
+    0x09, 0x00, 0x00, 0x00, 0x01, 0x01, 0x02, 0x00, 0x07
+};
+static uint8_t amiibo_header3[] = {
+    0x00, 0x00, 0x00, 0x00, 0x71, 0x4E, 0x3C, 0x11, 0xCE, 0xEE, 0x3A, 0xCE,0x8E, 0x49, 0xEA,0xB0, 0x71, 0x51, 0x30, 0xCF, 0xED, 0xE4, 0x89, 0x00, 0x9F, 0xB7, 0x96, 0x14, 0x88, 0x72, 0x2B, 0x7A, 0x7F, 0xB0, 0xF4, 0x7D, 0x03, 0x00, 0x3B, 0x3C, 0x77, 0x78, 0x86, 0x00, 0x00
 };
 static uint8_t amiibo_data[540] = {0};
 static uint8_t charging_grip_data[] = {
@@ -194,6 +252,23 @@ static uint8_t charging_grip_data[] = {
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff
+};
+static uint8_t spi_flash_0x00013000[] = {
+0x01, 0x00,
+0x48, 0x45, 0x4A, 0x37, 0x31, 0x30, 0x30, 0x31, 0x31, 0x32, 0x31, 0x32, 0x34, 0x37, 0x00, 0x00,
+0x7E, 0x05,
+#if CHANGE_DESC == 1
+0x66, 0x20,
+#elif CHANGE_DESC == 2
+0x67, 0x20,
+#else
+0x69, 0x20,
+#endif
+0x01, 0x06, 0x01,
+0x23, 0x23, 0x23,
+0xA0, 0xA0, 0xA0,
+0xE6, 0xE6, 0xE6,
+0x32, 0x32, 0x32,
 };
 
 static void set_command_reply(nx2_command_id_t cmd, uint8_t subcommand, uint8_t unknown, uint8_t ACK, const uint8_t *payload, uint16_t payload_len) {
@@ -229,23 +304,35 @@ static void respond_nfc(void) {
     //feature_payload[3] = proto[1];
     switch (last_host_output[3]) {
         case 0x0c:
-            uint8_t buf[] = {0x61, 0x12, 0x50, 0x0d};
-            set_command_reply(NX2_CMD_NFC, 0x0c, 0x10, NX2_ACK1, buf, sizeof(buf));
+            uint8_t buf[] = {0x61, 0x12, 0x50, 0x10};
+            set_command_reply(NX2_CMD_NFC, 0x0c, 0x0, NX2_ACK2, buf, sizeof(buf));
             break;
         case 0x15:
             uint8_t buf2[sizeof(amiibo_header) + sizeof(amiibo_data) + 71] = {0};
             memcpy(buf2, amiibo_header, sizeof(amiibo_header));
-            memcpy(buf2 + sizeof(amiibo_header), amiibo_data, sizeof(amiibo_data));
+            for (int i = 0; i < 3; i++) {
+                buf2[sizeof(amiibo_header) + i] = amiibo_data[i];
+            }
+            for (int i = 0; i < 4; i++) {
+                buf2[sizeof(amiibo_header) + 3 + i] = amiibo_data[4 + i];
+            }
+            memcpy(buf2 + sizeof(amiibo_header) + 7, amiibo_header3, sizeof(amiibo_header3));
+            memcpy(buf2 + sizeof(amiibo_header) + 7 + sizeof(amiibo_header3), amiibo_data, sizeof(amiibo_data));
             set_command_reply(NX2_CMD_NFC, 0x15, 0x00, NX2_ACK2, buf2, sizeof(buf2));
             break;
         case 0x05:
-            uint8_t buf3[sizeof(amiibo_header2) + 8] = {0};
+            uint8_t buf3[sizeof(amiibo_header2) + 7] = {0};
             memcpy(buf3, amiibo_header2, sizeof(amiibo_header2));
-            memcpy(buf3 + sizeof(amiibo_header2), amiibo_data, 8);
+            for (int i = 0; i < 3; i++) {
+                buf3[sizeof(amiibo_header2) + i] = amiibo_data[i];
+            }
+            for (int i = 0; i < 4; i++) {
+                buf3[sizeof(amiibo_header2) + 3 + i] = amiibo_data[4 + i];
+            }
             set_command_reply(NX2_CMD_NFC, 0x05, 0x00, NX2_ACK2, buf3, sizeof(buf3));
             break;
         default:
-            set_command_reply(NX2_CMD_NFC, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+            set_command_reply(NX2_CMD_NFC, last_host_output[3], 0x00, NX2_ACK2, NULL, 0);
             break;
     }
 }
@@ -255,9 +342,11 @@ static uint8_t read_memory_block(uint32_t address, uint8_t* buffer, uint8_t leng
     switch (address) {
         case 0x00013080:
             memcpy(buffer, spi_flash_0x00013080, sizeof(spi_flash_0x00013080));
+            len = sizeof(spi_flash_0x00013080) + 8;
             break;
         case 0x000130c0:
             memcpy(buffer, spi_flash_0x000130c0, sizeof(spi_flash_0x000130c0));
+            len = sizeof(spi_flash_0x000130c0) + 8;
             break;
         case 0x00013100:
             memcpy(buffer, spi_flash_0x00013100, sizeof(spi_flash_0x00013100));
@@ -271,9 +360,11 @@ static uint8_t read_memory_block(uint32_t address, uint8_t* buffer, uint8_t leng
             break;
         case 0x00013060:
             len = 40;
-            //memset(buffer + 32, 0x00, length - 32);
+            memset(buffer, 0xFF, 32);
+            break;
         default:
             memset(buffer, 0xFF, length);
+            len = length + 8;
             break;
     }
     return len;
@@ -303,7 +394,7 @@ static void respond_flash_memory(void) {
             uint32_t address = last_host_output[12] | (last_host_output[13] << 8) | (last_host_output[14] << 16) | (last_host_output[15] << 24);
             uint8_t buf[72] = {0};
             memset(buf, 0xFF, sizeof(buf));
-            buf[0] = 0x40;
+            buf[0] = last_host_output[8];
             buf[1] = 0x00;
             buf[2] = 0x00;
             buf[3] = 0x00;
@@ -312,17 +403,17 @@ static void respond_flash_memory(void) {
             buf[6] = last_host_output[14];
             buf[7] = last_host_output[15];
             uint8_t send_len = read_memory_block(address, buf+8, 64);
-            set_command_reply(NX2_CMD_FLASH_MEMORY, last_host_output[3], 0x10, NX2_ACK1, buf, send_len);
+            set_command_reply(NX2_CMD_FLASH_MEMORY, last_host_output[3], 0x0, NX2_ACK2, buf, send_len);
             break;
         case 0x02:
             //uint32_t address2 = last_host_output[12] | (last_host_output[13] << 8) | (last_host_output[14] << 16) | (last_host_output[15] << 24);
             //const uint8_t* data = &last_host_output[16];
             //write_memory_block(address2, data, 64);
-            set_command_reply(NX2_CMD_FLASH_MEMORY, 0x02, 0x10, NX2_ACK1, &last_host_output[8], 8);
+            set_command_reply(NX2_CMD_FLASH_MEMORY, 0x02, 0x0, NX2_ACK2, &last_host_output[8], 8);
             break;
         case 0x03:
             uint8_t buf2[4] = {0};
-            set_command_reply(NX2_CMD_FLASH_MEMORY, 0x03, 0x00, NX2_ACK1, buf2, sizeof(buf2));
+            set_command_reply(NX2_CMD_FLASH_MEMORY, 0x03, 0x00, NX2_ACK2, buf2, sizeof(buf2));
             break;
         case 0x05:
             uint8_t buf3[8] = {0};
@@ -330,10 +421,10 @@ static void respond_flash_memory(void) {
             buf3[5] = last_host_output[13];
             buf3[6] = last_host_output[14];
             buf3[7] = last_host_output[15];
-            set_command_reply(NX2_CMD_FLASH_MEMORY, 0x05, 0x10, NX2_ACK1, buf3, sizeof(buf3));
+            set_command_reply(NX2_CMD_FLASH_MEMORY, 0x05, 0x0, NX2_ACK2, buf3, sizeof(buf3));
             break;
         default:
-            set_command_reply(NX2_CMD_FLASH_MEMORY, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+            set_command_reply(NX2_CMD_FLASH_MEMORY, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
             break;
     }
 }
@@ -362,7 +453,7 @@ static void respond_initialisation(void) {
             set_command_reply(NX2_CMD_INIT, last_host_output[3], 0x00, NX2_ACK2, buf2, sizeof(buf2));
             break;
         default:
-            set_command_reply(NX2_CMD_INIT, last_host_output[3], 0x00, NX2_ACK1, NULL, 0);
+            set_command_reply(NX2_CMD_INIT, last_host_output[3], 0x00, NX2_ACK2, NULL, 0);
             break;
     }
 }
@@ -390,23 +481,23 @@ static void respond_battery(void) {
         case 0x03:
             {
                 uint8_t buf[] = {0xa5, 0x0e, 0x00, 0x00};
-                set_command_reply(NX2_CMD_BATTERY, last_host_output[3], 0x10, NX2_ACK1, buf, sizeof(buf));
+                set_command_reply(NX2_CMD_BATTERY, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
             }
             break;
         case 0x04:
             {
                 uint8_t buf2[] = {0x34, 0x00, 0x83, 0x00};
-                set_command_reply(NX2_CMD_BATTERY, last_host_output[3], 0x10, NX2_ACK1, buf2, sizeof(buf2));
+                set_command_reply(NX2_CMD_BATTERY, last_host_output[3], 0x0, NX2_ACK2, buf2, sizeof(buf2));
             }
             break;
         case 0x06:
             {
                 uint8_t buf3[] = {0x11, 0x00, 0x00, 0x00};
-                set_command_reply(NX2_CMD_BATTERY, last_host_output[3], 0x10, NX2_ACK1, buf3, sizeof(buf3));
+                set_command_reply(NX2_CMD_BATTERY, last_host_output[3], 0x0, NX2_ACK2, buf3, sizeof(buf3));
             }
             break;
         default:
-            set_command_reply(NX2_CMD_BATTERY, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+            set_command_reply(NX2_CMD_BATTERY, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
             break;
     }
 }
@@ -423,18 +514,30 @@ static void respond_feature(void) {
                     buf[5] = 0x07;
                 }
                 if (last_host_output[8] & 0x04) {
+#if CHANGE_DESC
+                    buf[6] = 0x03;
+#else
                     buf[6] = 0x01;
+#endif
                 }
                 if (last_host_output[8] & 0x80) {
+#if CHANGE_DESC
+                    buf[7] = 0x03;
+#else
                     buf[7] = 0x01;
+#endif
                 }
                 if (last_host_output[8] & 0x10) {
+#if CHANGE_DESC
+                    buf[8] = 0x03;
+#else
                     buf[8] = 0x01;
+#endif
                 }
                 if (last_host_output[8] & 0x20) {
                     buf[9] = 0x03;
                 }
-                set_command_reply(NX2_CMD_FEATURE, last_host_output[3], 0x10, NX2_ACK1, buf, sizeof(buf));
+                set_command_reply(NX2_CMD_FEATURE, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
             }
             break;
         case 0x02:
@@ -444,7 +547,7 @@ static void respond_feature(void) {
                 }
                 //if need more feature, add here
                 uint8_t buf2[] = {0x00, 0x00, 0x00, 0x00};
-                set_command_reply(NX2_CMD_FEATURE, last_host_output[3], 0x10, NX2_ACK1, buf2, sizeof(buf2));
+                set_command_reply(NX2_CMD_FEATURE, last_host_output[3], 0x0, NX2_ACK2, buf2, sizeof(buf2));
             }
             break;
         case 0x03:
@@ -452,10 +555,10 @@ static void respond_feature(void) {
         case 0x04:
         case 0x05:
             uint8_t buf3[] = {0x00, 0x00, 0x00, 0x00};
-            set_command_reply(NX2_CMD_FEATURE, last_host_output[3], 0x10, NX2_ACK1, buf3, sizeof(buf3));
+            set_command_reply(NX2_CMD_FEATURE, last_host_output[3], 0x0, NX2_ACK2, buf3, sizeof(buf3));
             break;
         default:
-            set_command_reply(NX2_CMD_FEATURE, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+            set_command_reply(NX2_CMD_FEATURE, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
             break;
     }
 }
@@ -464,8 +567,8 @@ static void respond_bt_pair(void) {
     switch (last_host_output[3]) {
         case 0x01:
             {
-                uint8_t buf[] = {0x01, 0x04, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-                set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x10, NX2_ACK1, buf, sizeof(buf));
+                uint8_t buf[] = {0x01, 0x04, 0x01, 0xe8, 0x20, 0x17, 0x05, 0x48, 0xc8};
+                set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
             }
             break;
         case 0x02:
@@ -479,14 +582,14 @@ static void respond_bt_pair(void) {
                 uint8_t buf2[17] = {0};
                 buf2[0] = 0x01;
                 memcpy(&buf2[1], data, 16);
-                set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x10, NX2_ACK1, buf2, sizeof(buf2));
+                set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x0, NX2_ACK2, buf2, sizeof(buf2));
                 AES_CTX_Free(&ctx);
             }
             break;
         case 0x03:
             {
                 uint8_t buf3[1] = {0x01};
-                set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x10, NX2_ACK1, buf3, sizeof(buf3));
+                set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x0, NX2_ACK2, buf3, sizeof(buf3));
             }
             break;
         case 0x04:
@@ -503,11 +606,11 @@ static void respond_bt_pair(void) {
                 for (int i = 0; i < 16; i++) {
                     buf4[1 + i] = dev_key[15 - i];
                 }
-                set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x10, NX2_ACK1, buf4, sizeof(buf4));
+                set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x0, NX2_ACK2, buf4, sizeof(buf4));
             }
             break;
         default:
-            set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+            set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
             break;
     }
 }
@@ -575,6 +678,33 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
     }
 }
 
+bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const* request) {
+    if (stage != CONTROL_STAGE_SETUP) {
+        return true;
+    }
+    if (request->bmRequestType & 0x80) {
+        switch (request->bRequest) {
+            case SetupRequestId_DeviceInfo:
+                tud_control_xfer(rhport, request, (void*)&device_info, sizeof(device_info));
+                return true;
+            case SetupRequestId_FactoryData:
+                uint8_t buf[64];
+                memset(buf, 0xFF, sizeof(buf));
+                memcpy(buf, spi_flash_0x00013000, sizeof(spi_flash_0x00013000));
+                tud_control_xfer(rhport, request, (void*)buf, sizeof(buf));
+                return true;
+            default:
+                return false;
+        }
+    } else if (request->bRequest == 0x04) {
+        //Is the maximum length of data read/write set?
+        //0x276 = 630 bytes
+            tud_control_xfer(rhport, request, NULL, 0);
+            return true;
+    }
+    return false;
+}
+
 void tud_vendor_rx_cb(uint8_t idx, const uint8_t *buf, uint32_t bufs) {
 
     uint8_t buffer[tud_vendor_n_available(idx)];
@@ -607,9 +737,9 @@ void tud_vendor_rx_cb(uint8_t idx, const uint8_t *buf, uint32_t bufs) {
             case NX2_CMD_UNKNOWN07:
                 if (last_host_output[3] == 0x01) {
                     uint8_t buf[1] = {0x00};
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, buf, sizeof(buf));
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
                 } else {
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
                 }
                 break;
             case NX2_CMD_CHRGRIP:
@@ -617,11 +747,11 @@ void tud_vendor_rx_cb(uint8_t idx, const uint8_t *buf, uint32_t bufs) {
                 break;
             case NX2_CMD_PLAYER_LED:
                 //respond_player_led();
-                set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+                set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
                 break;
             case NX2_CMD_VIBRATION:
                 //respond_vibration();
-                set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+                set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
                 break;
             case NX2_CMD_BATTERY:
                 respond_battery();
@@ -633,47 +763,60 @@ void tud_vendor_rx_cb(uint8_t idx, const uint8_t *buf, uint32_t bufs) {
                 break;
             case NX2_CMD_FW_INFO:
                 if (last_host_output[3] == 0x01) {
-                    uint8_t buf[] = {0x01, 0x00, 0x16, NX2_CONTROLLER_TYPE, 0x0c, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff};
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, buf, sizeof(buf));
+                    uint8_t buf[] = {0x02, 0x01, 0x04, NX2_CONTROLLER_TYPE, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0x00};
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
                 } else {
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
                 }
                 break;
             case NX2_CMD_UNKNOWN11:
                 if (last_host_output[3] == 0x01) {
                     uint8_t buf[] = {0x01, 0x00, 0x00, 0x00};
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, buf, sizeof(buf));
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
                 } else if (last_host_output[3] == 0x03) {
                     uint8_t buf[] = {0x01, 0x20, 0x03, 0x00, 0x00, 0x0a, 0xe8, 0x1c, 0x3b, 0x79, 0x7d, 0x8b, 0x3a, 0x0a, 0xe8, 0x9c, 0x42, 0x58, 0xa0, 0x0b, 0x42, 0x0a, 0xe8, 0x9c, 0x41, 0x58, 0xa0, 0x0b, 0x41};
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, buf, sizeof(buf));
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
                 } else {
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
                 }
                 break;
+#if CHANGE_DESC
+            case NX2_CMD_UNKNOWN13:
+                if (last_host_output[3] == 0x01) {
+                    uint8_t buf[] = {0x01, 0x00, 0x00, 0x00};
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
+                } else {
+                    uint8_t buf[] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
+                }
+                break;
+#endif
             case NX2_CMD_BT_PAIR:
                 respond_bt_pair();
                 break;
             case NX2_CMD_UNKNOWN16:
                 if (last_host_output[3] == 0x01) {
                     uint8_t buf[0x18] = {0};
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, buf, sizeof(buf));
+                    buf[12] = 0x7c;
+                    buf[13] = 0x06;
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
                 } else {
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
                 }
                 break;
             case NX2_CMD_UNKNOWN18:
                 if (last_host_output[3] == 0x01) {
                     uint8_t buf[] = {0x00, 0x00, 0x40, 0xf0, 0x00, 0x00, 0x60, 0x00};
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, buf, sizeof(buf));
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
                 } else if (last_host_output[3] == 0x03) {
                     uint8_t buf[1] = {last_host_output[8]};
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, buf, sizeof(buf));
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
                 } else {
-                    set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
                 }
                 break;
             default:
-                set_command_reply(cmd, last_host_output[3], 0x10, NX2_ACK1, NULL, 0);
+                set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
                 break;
         }
 
