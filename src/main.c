@@ -12,8 +12,9 @@
 #include "hardware/structs/ioqspi.h"
 #include "hardware/structs/sio.h"
 #include "AES_128_ECB.h"
+#include <hardware/flash.h>
 
-#define CHANGE_DESC 1
+#define CHANGE_DESC 0
 
 #if CHANGE_DESC == 1
 #define NX2_INPUT_REPORT_ID 0x08
@@ -239,13 +240,15 @@ static uint8_t spi_flash_0x00013100[] = {
 static uint8_t amiibo_header[] = {
     0x01, 0x58, 0x02, 0x04, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x07
 };
-static uint8_t amiibo_header2[] = {
+uint8_t amiibo_header2[] = {
     0x09, 0x00, 0x00, 0x00, 0x01, 0x01, 0x02, 0x00, 0x07
 };
 static uint8_t amiibo_header3[] = {
     0x00, 0x00, 0x00, 0x00, 0x71, 0x4E, 0x3C, 0x11, 0xCE, 0xEE, 0x3A, 0xCE,0x8E, 0x49, 0xEA,0xB0, 0x71, 0x51, 0x30, 0xCF, 0xED, 0xE4, 0x89, 0x00, 0x9F, 0xB7, 0x96, 0x14, 0x88, 0x72, 0x2B, 0x7A, 0x7F, 0xB0, 0xF4, 0x7D, 0x03, 0x00, 0x3B, 0x3C, 0x77, 0x78, 0x86, 0x00, 0x00
 };
-static uint8_t amiibo_data[540] = {0};
+uint8_t amiibo_data[540] = {
+    0
+};
 static uint8_t charging_grip_data[] = {
     0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x48, 0x45, 0x4a, 0x37, 0x31, 0x30, 0x30, 0x31, 0x31, 0x32,
     0x31, 0x32, 0x34, 0x37, 0x00, 0x00, 0x7e, 0x05, 0x69, 0x20, 0x01, 0x06, 0x01, 0xff, 0xff, 0xff,
@@ -255,7 +258,7 @@ static uint8_t charging_grip_data[] = {
 };
 static uint8_t spi_flash_0x00013000[] = {
 0x01, 0x00,
-0x48, 0x45, 0x4A, 0x37, 0x31, 0x30, 0x30, 0x31, 0x31, 0x32, 0x31, 0x32, 0x34, 0x37, 0x00, 0x00,
+0x48, 0x45, 0x4A, 0x31, 0x30, 0x30, 0x30, 0x30, 0x33, 0x31, 0x34, 0x33, 0x37, 0x32, 0x00, 0x00,
 0x7E, 0x05,
 #if CHANGE_DESC == 1
 0x66, 0x20,
@@ -270,6 +273,38 @@ static uint8_t spi_flash_0x00013000[] = {
 0xE6, 0xE6, 0xE6,
 0x32, 0x32, 0x32,
 };
+
+const uint32_t FLASH_TARGET_OFFSET = 0x1F0000;
+
+static void save_setting_to_flash(void)
+{
+    // W25Q16JVの最終ブロック(Block31)のセクタ0の先頭アドレス = 0x1F0000
+    // W25Q16JVの書き込み最小単位 = FLASH_PAGE_SIZE(256Byte)
+    // FLASH_PAGE_SIZE(256Byte)はflash.hで定義済
+    uint8_t write_data[FLASH_PAGE_SIZE];
+
+    // 保存データのセット(例)
+    memcpy(write_data, bt_ltk, sizeof(bt_ltk));
+
+    // 割り込み無効にする
+    uint32_t ints = save_and_disable_interrupts();
+    // Flash消去。
+    //  消去単位はflash.hで定義されている FLASH_SECTOR_SIZE(4096Byte) の倍数とする
+    flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
+    // Flash書き込み。
+    //  書込単位はflash.hで定義されている FLASH_PAGE_SIZE(256Byte) の倍数とする
+    flash_range_program(FLASH_TARGET_OFFSET, write_data, FLASH_PAGE_SIZE);
+    // 割り込みフラグを戻す
+    restore_interrupts(ints);
+}
+
+void load_setting_from_flash(void)
+{
+    // W25Q16JVの最終ブロック(Block31)のセクタ0の先頭アドレス = 0x1F0000
+    // XIP_BASE(0x10000000)はflash.hで定義済み
+    const uint8_t *flash_target_contents = (const uint8_t *) (XIP_BASE + FLASH_TARGET_OFFSET);
+    memcpy(bt_ltk, flash_target_contents, sizeof(bt_ltk));
+}
 
 static void set_command_reply(nx2_command_id_t cmd, uint8_t subcommand, uint8_t unknown, uint8_t ACK, const uint8_t *payload, uint16_t payload_len) {
     memset(command_reply, 0, sizeof(command_reply));
@@ -321,7 +356,7 @@ static void respond_nfc(void) {
             set_command_reply(NX2_CMD_NFC, 0x15, 0x00, NX2_ACK2, buf2, sizeof(buf2));
             break;
         case 0x05:
-            uint8_t buf3[sizeof(amiibo_header2) + 7] = {0};
+            uint8_t buf3[61] = {0};
             memcpy(buf3, amiibo_header2, sizeof(amiibo_header2));
             for (int i = 0; i < 3; i++) {
                 buf3[sizeof(amiibo_header2) + i] = amiibo_data[i];
@@ -329,7 +364,27 @@ static void respond_nfc(void) {
             for (int i = 0; i < 4; i++) {
                 buf3[sizeof(amiibo_header2) + 3 + i] = amiibo_data[4 + i];
             }
-            set_command_reply(NX2_CMD_NFC, 0x05, 0x00, NX2_ACK2, buf3, sizeof(buf3));
+            set_command_reply(NX2_CMD_NFC, 0x05, 0x00, NX2_ACK2, buf3, 61);
+            break;
+        case 0x03:
+            if (last_host_output[5] == 5 && last_host_output[9] == 0x00 && last_host_output[10] == 0x00 && last_host_output[11] == 0x2c && last_host_output[12] == 0x01) {
+                set_command_reply(NX2_CMD_NFC, 0x03, 0x00, NX2_ACK2, NULL, 0);
+                input_payload.unknown1[1] = 1;
+            } else if (last_host_output[5] == 5 && last_host_output[9] == 0xe8 && last_host_output[10] == 0x03 && last_host_output[11] == 0x2c && last_host_output[12] == 0x01) {
+                set_command_reply(NX2_CMD_NFC, 0x03, 0x00, NX2_ACK2, NULL, 0);
+                input_payload.unknown1[1] = 2;
+            }
+            break;
+        case 0x06:
+            set_command_reply(NX2_CMD_NFC, 0x06, 0x00, NX2_ACK2, NULL, 0);
+            input_payload.unknown1[1] = 3;
+            amiibo_header2[0] = 0x04;
+            break;
+        case 0x04:
+            set_command_reply(NX2_CMD_NFC, 0x04, 0x00, NX2_ACK2, NULL, 0);
+            //if (input_payload.unknown1[1] != 0 && input_payload.unknown1[1] != 1) {
+            //    input_payload.unknown1[1] = 0;
+            //}
             break;
         default:
             set_command_reply(NX2_CMD_NFC, last_host_output[3], 0x00, NX2_ACK2, NULL, 0);
@@ -438,6 +493,7 @@ static void respond_initialisation(void) {
             for (int i = 0; i < 16; i++) {
                 bt_ltk[i] = last_host_output[29 - i];
             }
+            save_setting_to_flash();
             set_command_reply(NX2_CMD_INIT, last_host_output[3], 0x00, NX2_ACK2, NULL, 0);
             break;
         case 0x0D:
@@ -582,6 +638,9 @@ static void respond_bt_pair(void) {
                 uint8_t buf2[17] = {0};
                 buf2[0] = 0x01;
                 memcpy(&buf2[1], data, 16);
+                //for (int i = 0; i < 16; i++) {
+                //    buf2[1 + i] = data[15 - i];
+                //}
                 set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x0, NX2_ACK2, buf2, sizeof(buf2));
                 AES_CTX_Free(&ctx);
             }
@@ -606,6 +665,7 @@ static void respond_bt_pair(void) {
                 for (int i = 0; i < 16; i++) {
                     buf4[1 + i] = dev_key[15 - i];
                 }
+                save_setting_to_flash();
                 set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x0, NX2_ACK2, buf4, sizeof(buf4));
             }
             break;
@@ -751,7 +811,15 @@ void tud_vendor_rx_cb(uint8_t idx, const uint8_t *buf, uint32_t bufs) {
                 break;
             case NX2_CMD_VIBRATION:
                 //respond_vibration();
-                set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
+                //{
+                if (last_host_output[3] == 0x02) {
+                    uint8_t buf[] = {last_host_output[8], 0x00, 0x00, 0x00};
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, buf, sizeof(buf));
+                } else {
+                    set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
+                }
+                //}
+                //set_command_reply(cmd, last_host_output[3], 0x0, NX2_ACK2, NULL, 0);
                 break;
             case NX2_CMD_BATTERY:
                 respond_battery();
@@ -874,6 +942,7 @@ int main(void) {
     //mutex_init(&__usb_mutex);
     tusb_init(0);
     board_init_after_tusb();
+    load_setting_from_flash();
     //printf("Nintendo Switch2 Emulation Started\n");
 
 #if EN_AUDIO
