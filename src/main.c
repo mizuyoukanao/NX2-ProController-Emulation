@@ -3,14 +3,13 @@
 #include <string.h>
 #include <stdint.h>
 #include "pico/stdlib.h"
+#include "pico/multicore.h"
 //#include "pico/mutex.h"
 #include "bsp/board.h"
 #include "tusb.h"
 #include <string.h>
 #include "hardware/gpio.h"
-#include "hardware/sync.h"
-#include "hardware/structs/ioqspi.h"
-#include "hardware/structs/sio.h"
+#include "hardware/uart.h"
 #include "AES_128_ECB.h"
 #include <hardware/flash.h>
 
@@ -210,6 +209,160 @@ static nx2_output_payload_t output_payload = {
     .right_rumble = {0},
     .reserved = {0},
 };
+
+#define STDIO_UART_ID uart0
+#define STDIO_UART_TX_PIN 0
+#define STDIO_UART_RX_PIN 1
+#define GPIO_UART_BAUDRATE 4800
+#define GPIO_UART_MARKER 0xAB
+#define UART_MIN_PACKET_SIZE 11
+#define UART_MAX_PACKET_SIZE 64
+
+typedef struct {
+    uint16_t buttons;
+    uint8_t hat;
+    uint8_t lx;
+    uint8_t ly;
+    uint8_t rx;
+    uint8_t ry;
+} uart_controller_state_t;
+
+static volatile uart_controller_state_t g_uart_state = {
+    .buttons = 0,
+    .hat = 0x08,
+    .lx = 0x80,
+    .ly = 0x80,
+    .rx = 0x80,
+    .ry = 0x80,
+};
+
+static inline void pack_stick_8bit_to_12bit(uint8_t x8, uint8_t y8, uint8_t out[3]) {
+    uint16_t x12 = ((uint16_t)x8) << 4;
+    uint16_t y12 = ((uint16_t)y8) << 4;
+    out[0] = (uint8_t)(x12 & 0xFF);
+    out[1] = (uint8_t)(((x12 >> 8) & 0x0F) | ((y12 & 0x0F) << 4));
+    out[2] = (uint8_t)((y12 >> 4) & 0xFF);
+}
+
+static void apply_uart_state_to_input_payload(void) {
+    uart_controller_state_t state = g_uart_state;
+    uint8_t b0 = 0;
+    uint8_t b1 = 0;
+    uint8_t b2 = 0;
+
+    // data[1] | data[2] << 8 のビット定義:
+    // Y,B,A,X,L,R,ZL,ZR,-,+,LClick,RClick,Home,Capture
+    if (state.buttons & 0x0002) b0 |= 0x01; // B
+    if (state.buttons & 0x0004) b0 |= 0x02; // A
+    if (state.buttons & 0x0001) b0 |= 0x04; // Y
+    if (state.buttons & 0x0008) b0 |= 0x08; // X
+    if (state.buttons & 0x0020) b0 |= 0x10; // R
+    if (state.buttons & 0x0080) b0 |= 0x20; // ZR
+    if (state.buttons & 0x0200) b0 |= 0x40; // Plus
+    if (state.buttons & 0x0800) b0 |= 0x80; // Right Stick Click
+
+    if (state.buttons & 0x0010) b1 |= 0x10; // L
+    if (state.buttons & 0x0040) b1 |= 0x20; // ZL
+    if (state.buttons & 0x0100) b1 |= 0x40; // Minus
+    if (state.buttons & 0x0400) b1 |= 0x80; // Left Stick Click
+
+    if (state.buttons & 0x1000) b2 |= 0x01; // Home
+    if (state.buttons & 0x2000) b2 |= 0x02; // Capture
+
+    // HAT(0-7,8=neutral) -> dpad bits
+    switch (state.hat & 0x0F) {
+        case 0x00: b1 |= 0x08; break;                   // Up
+        case 0x01: b1 |= (0x08 | 0x02); break;          // Up + Right
+        case 0x02: b1 |= 0x02; break;                   // Right
+        case 0x03: b1 |= (0x01 | 0x02); break;          // Down + Right
+        case 0x04: b1 |= 0x01; break;                   // Down
+        case 0x05: b1 |= (0x01 | 0x04); break;          // Down + Left
+        case 0x06: b1 |= 0x04; break;                   // Left
+        case 0x07: b1 |= (0x08 | 0x04); break;          // Up + Left
+        default: break;                                 // Neutral
+    }
+
+    input_payload.buttons[0] = b0;
+    input_payload.buttons[1] = b1;
+    input_payload.buttons[2] = b2;
+    pack_stick_8bit_to_12bit(state.lx, state.ly, input_payload.lstick);
+    pack_stick_8bit_to_12bit(state.rx, state.ry, input_payload.rstick);
+}
+
+static size_t uart_receive_packet(uint8_t *packet, size_t max_len) {
+    int ch = 0;
+    while (true) {
+        if (!uart_is_readable(STDIO_UART_ID)) {
+            tight_loop_contents();
+            continue;
+        }
+        ch = uart_getc(STDIO_UART_ID);
+        if ((uint8_t)ch == GPIO_UART_MARKER) {
+            packet[0] = (uint8_t)ch;
+            break;
+        }
+    }
+
+    size_t len = 1;
+    const uint32_t inter_byte_timeout_us = 3000;
+    while (len < max_len) {
+        if (!uart_is_readable_within_us(STDIO_UART_ID, inter_byte_timeout_us)) {
+            break;
+        }
+        packet[len++] = uart_getc(STDIO_UART_ID);
+    }
+    return len;
+}
+
+static void process_amiibo_chunk(const uint8_t *packet, size_t packet_len) {
+    static size_t amiibo_write_index = 0;
+    static uint8_t amiibo_frame_count = 0;
+
+    if (packet_len != UART_MAX_PACKET_SIZE) {
+        return;
+    }
+
+    const size_t chunk_offset = 10; // 11バイト目(1-based)
+    const size_t chunk_size = UART_MAX_PACKET_SIZE - chunk_offset; // 54 bytes
+
+    if ((amiibo_write_index + chunk_size) <= sizeof(amiibo_data)) {
+        memcpy(&amiibo_data[amiibo_write_index], &packet[chunk_offset], chunk_size);
+        amiibo_write_index += chunk_size;
+    }
+    amiibo_frame_count++;
+
+    if (amiibo_frame_count >= 10) {
+        if (amiibo_write_index != sizeof(amiibo_data)) {
+            memset(amiibo_data, 0, sizeof(amiibo_data));
+        }
+        amiibo_write_index = 0;
+        amiibo_frame_count = 0;
+    }
+}
+
+static void core1_entry(void) {
+    uart_init(STDIO_UART_ID, GPIO_UART_BAUDRATE);
+    gpio_set_function(STDIO_UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(STDIO_UART_RX_PIN, GPIO_FUNC_UART);
+    uart_set_hw_flow(STDIO_UART_ID, false, false);
+    uart_set_format(STDIO_UART_ID, 8, 1, UART_PARITY_NONE);
+    uart_set_fifo_enabled(STDIO_UART_ID, false);
+
+    uint8_t packet[UART_MAX_PACKET_SIZE] = {0};
+    while (true) {
+        size_t packet_len = uart_receive_packet(packet, sizeof(packet));
+        if (packet_len < UART_MIN_PACKET_SIZE) {
+            continue;
+        }
+        g_uart_state.buttons = (uint16_t)packet[1] | ((uint16_t)packet[2] << 8);
+        g_uart_state.hat = packet[3];
+        g_uart_state.lx = packet[4];
+        g_uart_state.ly = packet[5];
+        g_uart_state.rx = packet[6];
+        g_uart_state.ry = packet[7];
+        process_amiibo_chunk(packet, packet_len);
+    }
+}
 AES_CTX ctx;
 DeviceInfo device_info = {
     .fw_version = { .major = 0x02, .minor = 0x01, .micro = 0x04 },
@@ -926,47 +1079,12 @@ void tud_vendor_rx_cb(uint8_t idx, const uint8_t *buf, uint32_t bufs) {
     }
 }
 
-bool __no_inline_not_in_flash_func(get_bootsel_button)() {
-    const uint CS_PIN_INDEX = 1;
-
-    // Must disable interrupts, as interrupt handlers may be in flash, and we
-    // are about to temporarily disable flash access!
-    uint32_t flags = save_and_disable_interrupts();
-
-    // Set chip select to Hi-Z
-    hw_write_masked(&ioqspi_hw->io[CS_PIN_INDEX].ctrl,
-                    GPIO_OVERRIDE_LOW << IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_LSB,
-                    IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_BITS);
-
-    // Note we can't call into any sleep functions in flash right now
-    for (volatile int i = 0; i < 1000; ++i);
-
-    // The HI GPIO registers in SIO can observe and control the 6 QSPI pins.
-    // Note the button pulls the pin *low* when pressed.
-#if PICO_RP2040
-    #define CS_BIT (1u << 1)
-#else
-    #define CS_BIT SIO_GPIO_HI_IN_QSPI_CSN_BITS
-#endif
-    bool button_state = !(sio_hw->gpio_hi_in & CS_BIT);
-
-    // Need to restore the state of chip select, else we are going to have a
-    // bad time when we return to code in flash!
-    hw_write_masked(&ioqspi_hw->io[CS_PIN_INDEX].ctrl,
-                    GPIO_OVERRIDE_NORMAL << IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_LSB,
-                    IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_BITS);
-
-    restore_interrupts(flags);
-
-    return button_state;
-}
-
 #if EN_AUDIO
 void audio_task(void);
 #endif
 
 int main(void) {
-    //stdio_init_all();
+    stdio_init_all();
     board_init();
     //mutex_init(&__usb_mutex);
     tusb_init(0);
@@ -985,6 +1103,7 @@ int main(void) {
 #endif
 
     next_report_at = get_absolute_time();
+    multicore_launch_core1(core1_entry);
 
     //while (!tud_connected()) {tud_task();}
     while (true) {
@@ -1010,11 +1129,7 @@ int main(void) {
             //    }
             //}
             //hid_task();
-            if (get_bootsel_button()) {
-                input_payload.buttons[0] |= 2;
-            } else {
-                input_payload.buttons[0] &= ~2;
-            }
+            apply_uart_state_to_input_payload();
         //}
 #if EN_AUDIO
         audio_task();

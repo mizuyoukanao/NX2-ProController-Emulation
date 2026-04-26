@@ -24,6 +24,7 @@ target_compile_definitions(nx2_pro_controller PRIVATE
 
 target_link_libraries(nx2_pro_controller PRIVATE
     pico_stdlib
+    pico_multicore
     tinyusb_device
     tinyusb_board
 )
@@ -31,4 +32,4 @@ target_link_libraries(nx2_pro_controller PRIVATE
 pico_add_extra_outputs(nx2_pro_controller)
 
 pico_enable_stdio_usb(nx2_pro_controller 0)
-pico_enable_stdio_uart(nx2_pro_controller 0)
+pico_enable_stdio_uart(nx2_pro_controller 1)
