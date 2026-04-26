@@ -1,7 +1,7 @@
 #include "tusb.h"
 #include <string.h>
 
-#define CHANGE_DESC 1
+#define CHANGE_DESC 0
 
 // Nintendo Switch2 Pro コントローラーの VID/PID/Bcd デバイス値。
 // 参考資料: handheldlegend/docs の Pro Controller 2 / USB initialization ノート。
