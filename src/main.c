@@ -201,6 +201,7 @@ static uint8_t last_host_output[64] = {0};
 static uint16_t last_host_output_len = 0;
 static absolute_time_t next_report_at;
 static bool polling_enabled = false;
+static bool nfc_readed = false;
 static uint8_t host_address[6] = {0};
 static uint8_t bt_ltk[16] = {0};
 static uint8_t dev_key[16] = {0x10, 0x5f, 0x1a, 0xc4, 0x25, 0x63, 0x2b, 0xba, 0xe1, 0x05, 0xdf, 0x2c, 0x79, 0xee, 0xf6, 0x5c};
@@ -354,6 +355,7 @@ static void respond_nfc(void) {
             memcpy(buf2 + sizeof(amiibo_header) + 7, amiibo_header3, sizeof(amiibo_header3));
             memcpy(buf2 + sizeof(amiibo_header) + 7 + sizeof(amiibo_header3), amiibo_data, sizeof(amiibo_data));
             set_command_reply(NX2_CMD_NFC, 0x15, 0x00, NX2_ACK2, buf2, sizeof(buf2));
+            nfc_readed = true;
             break;
         case 0x05:
             uint8_t buf3[61] = {0};
@@ -365,23 +367,50 @@ static void respond_nfc(void) {
                 buf3[sizeof(amiibo_header2) + 3 + i] = amiibo_data[4 + i];
             }
             set_command_reply(NX2_CMD_NFC, 0x05, 0x00, NX2_ACK2, buf3, 61);
+            //if (nfc_readed) {
+            //    nfc_readed = false;
+            //    amiibo_header2[0] = 0x09;
+            //}
             break;
         case 0x03:
-            if (last_host_output[5] == 5 && last_host_output[9] == 0x00 && last_host_output[10] == 0x00 && last_host_output[11] == 0x2c && last_host_output[12] == 0x01) {
+            //if (last_host_output[5] == 5 && last_host_output[9] == 0x00 && last_host_output[10] == 0x00 && last_host_output[11] == 0x2c && last_host_output[12] == 0x01) {
+            //    set_command_reply(NX2_CMD_NFC, 0x03, 0x00, NX2_ACK2, NULL, 0);
+            //    input_payload.unknown1[1]++;
+            //} else if (last_host_output[5] == 5 && last_host_output[9] == 0xe8 && last_host_output[10] == 0x03 && last_host_output[11] == 0x2c && last_host_output[12] == 0x01) {
+            //    set_command_reply(NX2_CMD_NFC, 0x03, 0x00, NX2_ACK2, NULL, 0);
+            //    input_payload.unknown1[1]++;
+            //}
+            if (last_host_output[5] == 5 && last_host_output[11] == 0x2c && last_host_output[12] == 0x01) {
                 set_command_reply(NX2_CMD_NFC, 0x03, 0x00, NX2_ACK2, NULL, 0);
-                input_payload.unknown1[1] = 1;
-            } else if (last_host_output[5] == 5 && last_host_output[9] == 0xe8 && last_host_output[10] == 0x03 && last_host_output[11] == 0x2c && last_host_output[12] == 0x01) {
+                if (input_payload.unknown1[1] == 7) {
+                    input_payload.unknown1[1] = 0;
+                } else {
+                    input_payload.unknown1[1]+=1;
+                }
+            } else {
                 set_command_reply(NX2_CMD_NFC, 0x03, 0x00, NX2_ACK2, NULL, 0);
-                input_payload.unknown1[1] = 2;
+            }
+            if (nfc_readed) {
+                nfc_readed = false;
+                amiibo_header2[0] = 0x09;
             }
             break;
         case 0x06:
             set_command_reply(NX2_CMD_NFC, 0x06, 0x00, NX2_ACK2, NULL, 0);
-            input_payload.unknown1[1] = 3;
+            if (input_payload.unknown1[1] == 7) {
+                input_payload.unknown1[1] = 0;
+            } else {
+                input_payload.unknown1[1]+=1;
+            }
             amiibo_header2[0] = 0x04;
             break;
         case 0x04:
             set_command_reply(NX2_CMD_NFC, 0x04, 0x00, NX2_ACK2, NULL, 0);
+            //if (nfc_readed) {
+            //    nfc_readed = false;
+            //    amiibo_header2[0] = 0x09;
+            //    //input_payload.unknown1[1] = 1;
+            //}
             //if (input_payload.unknown1[1] != 0 && input_payload.unknown1[1] != 1) {
             //    input_payload.unknown1[1] = 0;
             //}
