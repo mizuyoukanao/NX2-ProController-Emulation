@@ -2,7 +2,7 @@
 
 // TinyUSB configuration for RP2040 Pro Controller emulation
 
-#define CHANGE_DESC 1
+#define CHANGE_DESC 0
 
 #define CFG_TUSB_MCU OPT_MCU_RP2040
 #define BOARD_DEVICE_RHPORT_NUM 0
