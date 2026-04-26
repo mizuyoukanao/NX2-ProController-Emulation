@@ -285,8 +285,8 @@ static void apply_uart_state_to_input_payload(void) {
     input_payload.buttons[0] = b0;
     input_payload.buttons[1] = b1;
     input_payload.buttons[2] = b2;
-    pack_stick_8bit_to_12bit(state.lx, state.ly, input_payload.lstick);
-    pack_stick_8bit_to_12bit(state.rx, state.ry, input_payload.rstick);
+    pack_stick_8bit_to_12bit(state.lx, (uint8_t)(0xFF - state.ly), input_payload.lstick);
+    pack_stick_8bit_to_12bit(state.rx, (uint8_t)(0xFF - state.ry), input_payload.rstick);
 }
 
 static size_t uart_receive_packet(uint8_t *packet, size_t max_len) {
