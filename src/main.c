@@ -213,7 +213,7 @@ static nx2_output_payload_t output_payload = {
 #define STDIO_UART_ID uart0
 #define STDIO_UART_TX_PIN 0
 #define STDIO_UART_RX_PIN 1
-#define GPIO_UART_BAUDRATE 4800
+#define GPIO_UART_BAUDRATE 9600
 #define GPIO_UART_MARKER 0xAB
 #define UART_MIN_PACKET_SIZE 11
 #define UART_MAX_PACKET_SIZE 64
@@ -313,7 +313,7 @@ static size_t uart_receive_packet(uint8_t *packet, size_t max_len) {
     }
     return len;
 }
-
+uint8_t amiibo_data[540];
 static void process_amiibo_chunk(const uint8_t *packet, size_t packet_len) {
     static size_t amiibo_write_index = 0;
     static uint8_t amiibo_frame_count = 0;
