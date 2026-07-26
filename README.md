@@ -22,5 +22,8 @@ cmake --build .
 ## 留意点
 - レポート送信はBOOTSELボタンによるAボタンのON/OFFのみです。他のボタンやスティックを操作したい場合は `idle_payload` を更新してください。
 
+### Windows の「コード 10」について
+このデバイスのオーディオディスクリプタは UAC1 (`bcdADC = 1.00`) です。Windows は列挙時に、スピーカーとマイクの Feature Unit に対して UAC1 の `GET_CUR` / `GET_MIN` / `GET_MAX` / `GET_RES` を送ります。これらを UAC2 の `CUR` / `RANGE` として処理したり、マイク側 Feature Unit を未処理のままストールさせると、`usbaudio.sys` がデバイスを開始できずコード 10 になります。実装は両 Feature Unit の UAC1 ミュート・音量要求に応答します。
+
 ## 使用ライブラリ
 https://github.com/halloweeks/AES-128-ECB
