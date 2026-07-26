@@ -503,7 +503,7 @@ uint8_t const desc_configuration[] = {
 0x24,        // bDescriptorType (See Next Line)
 0x02,        // bDescriptorSubtype (CS_INTERFACE -> FORMAT_TYPE)
 0x01,        // bFormatType 1
-0x01,        // bNrChannels (Mono)
+0x02,        // bNrChannels (Stereo)
 0x02,        // bSubFrameSize 2
 0x10,        // bBitResolution 16
 0x01,        // bSamFreqType 1
@@ -513,7 +513,7 @@ uint8_t const desc_configuration[] = {
 0x05,        // bDescriptorType (See Next Line)
 0x83,        // bEndpointAddress (IN/D2H)
 0x0D,        // bmAttributes (Isochronous, Sync, Data EP)
-0x60, 0x00,  // wMaxPacketSize 96
+0xC0, 0x00,  // wMaxPacketSize 192
 0x01,        // bInterval 1 (unit depends on device speed)
 
 0x07,        // bLength
@@ -534,6 +534,40 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
     (void)index;
     return desc_configuration;
 }
+
+#if !CHANGE_DESC
+static uint8_t desc_other_speed_configuration[sizeof(desc_configuration)];
+
+// The genuine controller reports the same full-speed endpoint sizes in its
+// other-speed configuration, but uses high-speed interval encoding.
+uint8_t const *tud_descriptor_other_speed_configuration_cb(uint8_t index) {
+    (void)index;
+
+    memcpy(desc_other_speed_configuration, desc_configuration,
+           sizeof(desc_other_speed_configuration));
+    desc_other_speed_configuration[1] = TUSB_DESC_OTHER_SPEED_CONFIG;
+
+    for (size_t offset = 0; offset < sizeof(desc_other_speed_configuration);) {
+        uint8_t const length = desc_other_speed_configuration[offset];
+        if (length == 0 || offset + length > sizeof(desc_other_speed_configuration)) {
+            break;
+        }
+
+        if (desc_other_speed_configuration[offset + 1] == TUSB_DESC_ENDPOINT && length >= 7) {
+            uint8_t const transfer_type = desc_other_speed_configuration[offset + 3] & 0x03;
+            if (transfer_type == TUSB_XFER_INTERRUPT) {
+                desc_other_speed_configuration[offset + 6] = 6;
+            } else if (transfer_type == TUSB_XFER_ISOCHRONOUS) {
+                desc_other_speed_configuration[offset + 6] = 4;
+            }
+        }
+
+        offset += length;
+    }
+
+    return desc_other_speed_configuration;
+}
+#endif
 
 // String descriptors
 char const *string_desc_arr[] = {
@@ -600,4 +634,28 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
     (void)itf;
     return desc_hid_report;
+}
+
+static tusb_desc_device_qualifier_t const desc_device_qualifier =
+{
+  .bLength            = sizeof(tusb_desc_device_qualifier_t),
+  .bDescriptorType    = TUSB_DESC_DEVICE_QUALIFIER,
+  .bcdUSB             = USB_BCD,
+
+  .bDeviceClass       = 0x00,
+  .bDeviceSubClass    = 0x00,
+  .bDeviceProtocol    = 0x00,
+
+  .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
+  .bNumConfigurations = 0x01,
+  .bReserved          = 0x00
+};
+
+// Invoked when received GET DEVICE QUALIFIER DESCRIPTOR request
+// Application return pointer to descriptor, whose contents must exist long enough for transfer to complete.
+// device_qualifier descriptor describes information about a high-speed capable device that would
+// change if the device were operating at the other speed. If not highspeed capable stall this request.
+uint8_t const* tud_descriptor_device_qualifier_cb(void)
+{
+  return (uint8_t const*) &desc_device_qualifier;
 }
