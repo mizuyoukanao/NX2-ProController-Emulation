@@ -503,7 +503,7 @@ uint8_t const desc_configuration[] = {
 0x24,        // bDescriptorType (See Next Line)
 0x02,        // bDescriptorSubtype (CS_INTERFACE -> FORMAT_TYPE)
 0x01,        // bFormatType 1
-0x02,        // bNrChannels (Stereo)
+0x01,        // bNrChannels (Mono)
 0x02,        // bSubFrameSize 2
 0x10,        // bBitResolution 16
 0x01,        // bSamFreqType 1
@@ -513,7 +513,7 @@ uint8_t const desc_configuration[] = {
 0x05,        // bDescriptorType (See Next Line)
 0x83,        // bEndpointAddress (IN/D2H)
 0x0D,        // bmAttributes (Isochronous, Sync, Data EP)
-0xC0, 0x00,  // wMaxPacketSize 192
+0x60, 0x00,  // wMaxPacketSize 96
 0x01,        // bInterval 1 (unit depends on device speed)
 
 0x07,        // bLength
@@ -524,6 +524,11 @@ uint8_t const desc_configuration[] = {
 0x00, 0x00,  // wLockDelay 0
 #endif
 };
+
+#if !CHANGE_DESC
+_Static_assert(sizeof(desc_configuration) == 268, "configuration descriptor length mismatch");
+_Static_assert(CFG_TUD_AUDIO_FUNC_1_DESC_LEN == 188, "audio descriptor length mismatch");
+#endif
 
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
     (void)index;
@@ -573,7 +578,7 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
         }
         _desc_str[1 + chr_count] = 0x01;
         chr_count += 1;
-    }  else {
+    } else if (index < TU_ARRAY_SIZE(string_desc_arr)) {
         const char *str = string_desc_arr[index];
         chr_count = (uint8_t)strlen(str);
         //if (chr_count > 31) {
@@ -582,6 +587,8 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
         for (uint8_t i = 0; i < chr_count; i++) {
             _desc_str[1 + i] = str[i];
         }
+    } else {
+        return NULL;
     }
 
     // first byte is length (including header), second byte is string descriptor type
@@ -593,28 +600,4 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
     (void)itf;
     return desc_hid_report;
-}
-
-static tusb_desc_device_qualifier_t const desc_device_qualifier =
-{
-  .bLength            = sizeof(tusb_desc_device_qualifier_t),
-  .bDescriptorType    = TUSB_DESC_DEVICE_QUALIFIER,
-  .bcdUSB             = USB_BCD,
-
-  .bDeviceClass       = 0x00,
-  .bDeviceSubClass    = 0x00,
-  .bDeviceProtocol    = 0x00,
-
-  .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
-  .bNumConfigurations = 0x01,
-  .bReserved          = 0x00
-};
-
-// Invoked when received GET DEVICE QUALIFIER DESCRIPTOR request
-// Application return pointer to descriptor, whose contents must exist long enough for transfer to complete.
-// device_qualifier descriptor describes information about a high-speed capable device that would
-// change if the device were operating at the other speed. If not highspeed capable stall this request.
-uint8_t const* tud_descriptor_device_qualifier_cb(void)
-{
-  return (uint8_t const*) &desc_device_qualifier;
 }

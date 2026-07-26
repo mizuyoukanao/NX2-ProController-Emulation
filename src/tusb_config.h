@@ -17,20 +17,24 @@
 
 #define CFG_TUD_ENDPOINT0_SIZE 64
 
-// HID only device configuration
+// Composite HID/vendor/UAC1 device configuration
 #define CFG_TUD_HID 1
 #define CFG_TUD_HID_EP_BUFSIZE 64
 #if CHANGE_DESC
 #define CFG_TUD_AUDIO 0
 #else
 #define CFG_TUD_AUDIO 1
+#define CFG_TUD_AUDIO_FUNC_1_DESC_LEN                                 188
+#define CFG_TUD_AUDIO_FUNC_1_N_AS_INT                                 2
+#define CFG_TUD_AUDIO_FUNC_1_CTRL_BUF_SZ                              64
 #define CFG_TUD_AUDIO_ENABLE_EP_OUT 1
-#define CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX TU_MAX(CFG_TUD_AUDIO10_FUNC_1_FORMAT_1_EP_SZ_OUT, TU_MAX(CFG_TUD_AUDIO20_FUNC_1_FORMAT_1_EP_SZ_OUT, CFG_TUD_AUDIO20_FUNC_1_FORMAT_2_EP_SZ_OUT))
+#define CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX                            192
+#define CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ                         (4 * CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX)
 #define CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE                              48000
 #define CFG_TUD_AUDIO_ENABLE_EP_IN                                    1
 #define CFG_TUD_AUDIO_FUNC_1_N_BYTES_PER_SAMPLE_TX                    2                                       // Driver gets this info from the descriptors - we define it here to use it to setup the descriptors and to do calculations with it below
 #define CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX                            1                                       // Driver gets this info from the descriptors - we define it here to use it to setup the descriptors and to do calculations with it below - be aware: for different number of channels you need another descriptor!
-#define CFG_TUD_AUDIO_EP_SZ_IN                                        TUD_AUDIO_EP_SIZE(TUD_OPT_HIGH_SPEED, CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE, CFG_TUD_AUDIO_FUNC_1_N_BYTES_PER_SAMPLE_TX, CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX)
+#define CFG_TUD_AUDIO_EP_SZ_IN                                        96
 #define CFG_TUD_AUDIO_FUNC_1_EP_IN_SZ_MAX                             CFG_TUD_AUDIO_EP_SZ_IN
 #define CFG_TUD_AUDIO_FUNC_1_EP_IN_SW_BUF_SZ                          (TUD_OPT_HIGH_SPEED ? 32 : 4) * CFG_TUD_AUDIO_EP_SZ_IN // Example write FIFO every 1ms, so it should be 8 times larger for HS device
 #endif
