@@ -35,7 +35,7 @@
 
 //static const uint8_t NX2_FEATURE_REPORT_ID = 0x80;
 
-#define EN_AUDIO 0
+#define EN_AUDIO CFG_TUD_AUDIO
 #if EN_AUDIO
 // Audio controls
 // Current states
@@ -50,6 +50,7 @@ audio20_control_range_4_n_t(1) sampleFreqRng;                                   
 
 // Audio test data
 uint16_t test_buffer_audio[CFG_TUD_AUDIO_FUNC_1_SAMPLE_RATE / 1000 * CFG_TUD_AUDIO_FUNC_1_N_BYTES_PER_SAMPLE_TX * CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX / 2];
+uint8_t audio_out_buffer[CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX];
 uint16_t startVal = 0;
 #endif
 
@@ -1145,6 +1146,9 @@ void audio_task(void) {
     return; // not enough time
   }
   start_ms = curr_ms;
+  // OUT FIFO を常に読み捨て、ホスト側の再生ストリームを停止させない。
+  tud_audio_read(audio_out_buffer, sizeof(audio_out_buffer));
+
   for (size_t cnt = 0; cnt < sizeof(test_buffer_audio) / 2; cnt++) {
     test_buffer_audio[cnt] = startVal++;
   }
@@ -1209,6 +1213,7 @@ bool tud_audio_set_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
 
   // We do not support any set range requests here, only current value requests
   TU_VERIFY(p_request->bRequest == AUDIO20_CS_REQ_CUR);
+  TU_VERIFY(channelNum <= CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX);
 
   // If request is for our feature unit
   if (entityID == 2) {
@@ -1283,6 +1288,8 @@ bool tud_audio_get_req_entity_cb(uint8_t rhport, tusb_control_request_t const *p
   uint8_t ctrlSel = TU_U16_HIGH(p_request->wValue);
   // uint8_t itf = TU_U16_LOW(p_request->wIndex); 			// Since we have only one audio function implemented, we do not need the itf value
   uint8_t entityID = TU_U16_HIGH(p_request->wIndex);
+
+  TU_VERIFY(channelNum <= CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX);
 
   // Input terminal (Microphone input)
   if (entityID == 1) {
