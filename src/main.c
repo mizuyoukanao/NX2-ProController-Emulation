@@ -12,6 +12,7 @@
 #include "hardware/uart.h"
 #include "AES_128_ECB.h"
 #include <hardware/flash.h>
+#include "pico/flash.h"
 
 #define CHANGE_DESC 0
 
@@ -339,6 +340,10 @@ static void process_amiibo_chunk(const uint8_t *packet, size_t packet_len) {
 }
 
 static void core1_entry(void) {
+    // core0 がフラッシュを書き換える間、この core を止められるようにする。
+    // これを呼ばないと XIP 停止中に core1 が命令フェッチして両コアごとハングする。
+    flash_safe_execute_core_init();
+
     uart_init(STDIO_UART_ID, GPIO_UART_BAUDRATE);
     gpio_set_function(STDIO_UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(STDIO_UART_RX_PIN, GPIO_FUNC_UART);
@@ -428,34 +433,102 @@ static uint8_t spi_flash_0x00013000[] = {
 
 const uint32_t FLASH_TARGET_OFFSET = 0x1F0000;
 
-static void save_setting_to_flash(void)
+// core1 のロックアウト待ち時間。core1 は SIO 割り込みで止まるので即座に応答する。
+#define FLASH_SAFE_TIMEOUT_MS 1000
+
+// 消去済みのセクタは全 0xFF なので、そのまま読むと LTK が 0xFF で埋まってしまう。
+// マジックを先頭に置いて「保存済みかどうか」を判定する。
+#define FLASH_SETTING_MAGIC 0x324B544Cu // 'LTK2'
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint8_t bt_ltk[16];
+    uint8_t host_address[6];
+} flash_setting_t;
+
+_Static_assert(sizeof(flash_setting_t) <= FLASH_PAGE_SIZE, "setting does not fit in one flash page");
+
+// flash_safe_execute() から呼ばれるワーカー。
+// ここに来た時点で割り込みは禁止され、core1 はロックアウトされている。
+static void flash_write_worker(void *param)
 {
-    // W25Q16JVの最終ブロック(Block31)のセクタ0の先頭アドレス = 0x1F0000
-    // W25Q16JVの書き込み最小単位 = FLASH_PAGE_SIZE(256Byte)
-    // FLASH_PAGE_SIZE(256Byte)はflash.hで定義済
-    uint8_t write_data[FLASH_PAGE_SIZE];
-
-    // 保存データのセット(例)
-    memcpy(write_data, bt_ltk, sizeof(bt_ltk));
-
-    // 割り込み無効にする
-    uint32_t ints = save_and_disable_interrupts();
+    const uint8_t *write_data = (const uint8_t *)param;
     // Flash消去。
     //  消去単位はflash.hで定義されている FLASH_SECTOR_SIZE(4096Byte) の倍数とする
     flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
     // Flash書き込み。
     //  書込単位はflash.hで定義されている FLASH_PAGE_SIZE(256Byte) の倍数とする
     flash_range_program(FLASH_TARGET_OFFSET, write_data, FLASH_PAGE_SIZE);
-    // 割り込みフラグを戻す
-    restore_interrupts(ints);
+}
+
+static void save_setting_to_flash(void)
+{
+    // W25Q16JVの最終ブロック(Block31)のセクタ0の先頭アドレス = 0x1F0000
+    // W25Q16JVの書き込み最小単位 = FLASH_PAGE_SIZE(256Byte)
+    // FLASH_PAGE_SIZE(256Byte)はflash.hで定義済
+    // flash_range_program() の転送元は RAM 上にある必要がある (スタックで可)
+    uint8_t write_data[FLASH_PAGE_SIZE];
+    memset(write_data, 0xFF, sizeof(write_data));
+
+    // 保存データのセット
+    flash_setting_t setting = { .magic = FLASH_SETTING_MAGIC };
+    memcpy(setting.bt_ltk, bt_ltk, sizeof(setting.bt_ltk));
+    memcpy(setting.host_address, host_address, sizeof(setting.host_address));
+    memcpy(write_data, &setting, sizeof(setting));
+
+    // core1 は XIP フラッシュ上のコードを実行し続けているため、
+    // save_and_disable_interrupts() だけでは不十分。イレースで XIP が止まった
+    // 瞬間に core1 が命令フェッチできなくなり、両コアごとハングする。
+    // flash_safe_execute() が core1 のロックアウトと割り込み禁止をまとめて行う。
+    // (core1 側で flash_safe_execute_core_init() を呼んでおくこと)
+    flash_safe_execute(flash_write_worker, write_data, FLASH_SAFE_TIMEOUT_MS);
+}
+
+// フラッシュ書き込みは 4KB イレースで数十 ms かかり、その間は割り込みを止める。
+// USB コールバックの中で実行するとコマンド応答を返す前にバスが止まってしまうので、
+// フラグだけ立てておいてメインループ側で処理する。
+static volatile bool flash_save_pending = false;
+static absolute_time_t flash_save_not_before; // 応答がバスへ出るまでの最低待ち時間
+static absolute_time_t flash_save_give_up_at; // ホストが IN を出さない場合の打ち切り
+
+static void request_flash_save(void)
+{
+    flash_save_pending = true;
+    flash_save_not_before = delayed_by_ms(get_absolute_time(), 5);
+    flash_save_give_up_at = delayed_by_ms(get_absolute_time(), 200);
+}
+
+static void flash_save_task(void)
+{
+    if (!flash_save_pending) {
+        return;
+    }
+    if (absolute_time_diff_us(get_absolute_time(), flash_save_not_before) > 0) {
+        return;
+    }
+    // コマンド応答を TX FIFO から吐き出し切るまで待つ。
+    // ただしホストが IN トークンを出さなくなった場合に保存が永久に走らないよう、
+    // 上限時間を過ぎたら待たずに書き込む。
+    if (tud_vendor_n_write_available(0) < CFG_TUD_VENDOR_TX_BUFSIZE &&
+        absolute_time_diff_us(get_absolute_time(), flash_save_give_up_at) > 0) {
+        return;
+    }
+
+    flash_save_pending = false;
+    save_setting_to_flash();
 }
 
 void load_setting_from_flash(void)
 {
     // W25Q16JVの最終ブロック(Block31)のセクタ0の先頭アドレス = 0x1F0000
     // XIP_BASE(0x10000000)はflash.hで定義済み
-    const uint8_t *flash_target_contents = (const uint8_t *) (XIP_BASE + FLASH_TARGET_OFFSET);
-    memcpy(bt_ltk, flash_target_contents, sizeof(bt_ltk));
+    const flash_setting_t *stored = (const flash_setting_t *)(XIP_BASE + FLASH_TARGET_OFFSET);
+    if (stored->magic != FLASH_SETTING_MAGIC) {
+        // 未保存 (消去済みセクタ)。初期値のままにする
+        return;
+    }
+    memcpy(bt_ltk, stored->bt_ltk, sizeof(bt_ltk));
+    memcpy(host_address, stored->host_address, sizeof(host_address));
 }
 
 static void set_command_reply(nx2_command_id_t cmd, uint8_t subcommand, uint8_t unknown, uint8_t ACK, const uint8_t *payload, uint16_t payload_len) {
@@ -469,12 +542,12 @@ static void set_command_reply(nx2_command_id_t cmd, uint8_t subcommand, uint8_t 
     command_reply[6] = 0x00; // reserved
     command_reply[7] = 0x00; // reserved
 
+    if (payload_len > sizeof(command_reply) - 8) {
+        payload_len = sizeof(command_reply) - 8;
+    }
     command_reply_len = 8 + payload_len;
 
     if (payload && payload_len > 0) {
-        //if (payload_len > sizeof(command_reply) - 2) {
-        //    payload_len = sizeof(command_reply) - 2;
-        //}
         memcpy(command_reply+8, payload, payload_len);
     }
 }
@@ -673,7 +746,7 @@ static void respond_initialisation(void) {
             for (int i = 0; i < 16; i++) {
                 bt_ltk[i] = last_host_output[29 - i];
             }
-            save_setting_to_flash();
+            request_flash_save();
             set_command_reply(NX2_CMD_INIT, last_host_output[3], 0x00, NX2_ACK2, NULL, 0);
             break;
         case 0x0D:
@@ -845,7 +918,7 @@ static void respond_bt_pair(void) {
                 for (int i = 0; i < 16; i++) {
                     buf4[1 + i] = dev_key[15 - i];
                 }
-                save_setting_to_flash();
+                request_flash_save();
                 set_command_reply(NX2_CMD_BT_PAIR, last_host_output[3], 0x0, NX2_ACK2, buf4, sizeof(buf4));
             }
             break;
@@ -947,8 +1020,15 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
 
 void tud_vendor_rx_cb(uint8_t idx, const uint8_t *buf, uint32_t bufs) {
 
-    uint8_t buffer[tud_vendor_n_available(idx)];
+    // 可変長配列だと受信が 0 バイトのときに buffer[1] が範囲外アクセスになり、
+    // 64 バイトを超えると last_host_output を溢れさせるため固定長で受ける
+    uint8_t buffer[sizeof(last_host_output)] = {0};
     uint32_t bufsize = tud_vendor_n_read(idx, buffer, sizeof(buffer));
+
+    // コマンドヘッダ (8 バイト) に満たないものは無視する
+    if (bufsize < 8) {
+        return;
+    }
 
     //printf("Vendor RX CB: idx=%d, bufsize=%d\n", idx, bufsize);
     //for (int i = 0; i < bufsize; i++) {
@@ -1118,6 +1198,8 @@ int main(void) {
             //}
             //hid_task();
             apply_uart_state_to_input_payload();
+            // 保留中のフラッシュ保存を、USB 応答を返し終えてから実行する
+            flash_save_task();
         //}
 #if EN_AUDIO
         audio_task();
